@@ -19,5 +19,6 @@ Finish my PCB and successfully weld that. But what is so stupid is that i welded
 
 ###### ---------------2024.9.10---------------
 
-i found a promblem that when you try to connnet stm32f103 to your computer by type-c, you should use two 5.1kR resistances in CC pin, which help computer to recognize the chip. For this version i did not use these resistance. Besides, you can ignore those two 2R2 resistances this go with D pin on type-c.
+i found a promblem that when you try to connnet stm32f103 to your computer by type-c, you should use two 5.1kR resistances in CC pin, which help computer to recognize the chip. For this version i did not use these resistance. Besides, you should use a 1.5k, which connects between D+ and 3.3V
 ![STM32-TYPEC](Image\STM32_TYPEC.png)
+![STM32-TYPEC-D+](Image\Dpin.png)
