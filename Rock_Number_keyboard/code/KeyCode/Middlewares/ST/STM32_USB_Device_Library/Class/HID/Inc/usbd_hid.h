@@ -107,6 +107,8 @@ typedef struct
   uint16_t          wItemLength;
 } __PACKED USBD_HIDDescTypeDef;
 
+
+
 /**
   * @}
   */
@@ -126,6 +128,7 @@ typedef struct
   */
 
 extern USBD_ClassTypeDef USBD_HID;
+extern USBD_HandleTypeDef hUsbDeviceFS;
 #define USBD_HID_CLASS &USBD_HID
 /**
   * @}

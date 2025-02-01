@@ -20,7 +20,8 @@
 #include "main.h"
 #include "usb_device.h"
 #include "gpio.h"
-
+#include "usbd_hid.h"
+#include "matrix_keyboard.h"  // 包含矩阵键盘头文件
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -43,15 +44,13 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-
 /* USER CODE BEGIN PV */
-
+uint8_t HID_Report[8] = {0};  // HID报告
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
-
 
 /* USER CODE END PFP */
 
@@ -90,13 +89,22 @@ int main(void)
   MX_GPIO_Init();
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
-
+  // 初始化矩阵键盘
+  Matrix_Keyboard_Init();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    // 扫描矩阵键盘并更新HID报告
+    Matrix_Keyboard_Scan(HID_Report);
+    
+    // 发送HID报告
+    USBD_HID_SendReport(&hUsbDeviceFS, HID_Report, sizeof(HID_Report));
+    
+    // 简单延时
+    HAL_Delay(10);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
