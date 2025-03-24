@@ -230,16 +230,16 @@
         },
         "options": "null"
       },
-      "uploader": "STLink",
+      "uploader": "JLink",
       "uploadConfig": {
         "bin": "",
-        "proType": "SWD",
-        "resetMode": "default",
-        "runAfterProgram": true,
-        "speed": 4000,
-        "address": "0x08000000",
-        "elFile": "None",
-        "optionBytes": ".eide/keycode.st.option.bytes.ini",
+        "baseAddr": "",
+        "cpuInfo": {
+          "vendor": "ST",
+          "cpuName": "STM32F407VE"
+        },
+        "proType": 1,
+        "speed": 8000,
         "otherCmds": ""
       },
       "uploadConfigMap": {
@@ -252,6 +252,17 @@
           },
           "proType": 1,
           "speed": 8000,
+          "otherCmds": ""
+        },
+        "STLink": {
+          "bin": "",
+          "proType": "SWD",
+          "resetMode": "default",
+          "runAfterProgram": true,
+          "speed": 4000,
+          "address": "0x08000000",
+          "elFile": "None",
+          "optionBytes": ".eide/keycode.st.option.bytes.ini",
           "otherCmds": ""
         }
       },

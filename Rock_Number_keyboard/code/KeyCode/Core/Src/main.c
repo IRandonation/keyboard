@@ -20,12 +20,11 @@
 #include "main.h"
 #include "usb_device.h"
 #include "gpio.h"
-#include "usbd_hid.h"
-#include "matrix_keyboard.h"  // 包含矩阵键盘头文件
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "usbd_hid.h"
+#include "matrix_keyboard.h"  // 包含矩阵键盘头文件
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -44,8 +43,31 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+
 /* USER CODE BEGIN PV */
-uint8_t HID_Report[8] = {0};  // HID报告
+extern USBD_HandleTypeDef hUsbDeviceFS;
+// HID报告结构体（兼容标准键盘）
+#pragma pack(push, 1)
+typedef struct {
+    uint8_t modifier;   // 修饰键
+    uint8_t reserved;   // 保留
+    uint8_t keycode[6]; // 最多6键
+} HID_KeyboardReport;
+#pragma pack(pop)
+
+// 发送HID报告
+void Send_HID_Report(uint8_t keycode) {
+    HID_KeyboardReport report = {0};
+
+    if (keycode != 0) {
+        report.keycode[0] = keycode; // 单键按下
+    }
+
+    // 通过USB发送报告
+    USBD_HID_SendReport(&hUsbDeviceFS, (uint8_t*)&report, sizeof(report));
+    HAL_Delay(20); // 等待数据发送完成
+}
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -86,25 +108,28 @@ int main(void)
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
-  MX_GPIO_Init();
+  // MX_GPIO_Init();
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
-  // 初始化矩阵键盘
-  Matrix_Keyboard_Init();
+  MatrixKeyboard_Init();
+  uint8_t last_key = 0;
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    // 扫描矩阵键盘并更新HID报告
-    Matrix_Keyboard_Scan(HID_Report);
-    
-    // 发送HID报告
-    USBD_HID_SendReport(&hUsbDeviceFS, HID_Report, sizeof(HID_Report));
-    
-    // 简单延时
-    HAL_Delay(10);
+    uint8_t key = MatrixKeyboard_Scan();
+        
+        if (key != 0) {
+            Send_HID_Report(key);  // 按下或重复时发送
+            last_key = key;
+        } else if (last_key != 0) {
+            Send_HID_Report(0);    // 释放时发送空报告
+            last_key = 0;
+        }
+        
+        HAL_Delay(10);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */

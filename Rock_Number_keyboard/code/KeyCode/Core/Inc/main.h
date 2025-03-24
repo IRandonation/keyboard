@@ -53,7 +53,7 @@ extern "C" {
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
-
+void Send_HID_Report(uint8_t keycode);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
