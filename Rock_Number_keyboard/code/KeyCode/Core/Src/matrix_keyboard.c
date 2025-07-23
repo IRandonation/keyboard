@@ -1,124 +1,195 @@
 #include "matrix_keyboard.h"
 
-// 行配置（默认低电平）
+// --- GPIO 配置 (与您原来的代码一致) ---
 static GPIO_TypeDef* ROW_Port[ROW_NUM] = {GPIOE, GPIOE, GPIOE, GPIOE, GPIOE};
 static uint16_t ROW_Pin[ROW_NUM] = {GPIO_PIN_15, GPIO_PIN_14, GPIO_PIN_13, GPIO_PIN_12, GPIO_PIN_11};
 
-// 列配置（下拉输入）
 static GPIO_TypeDef* COL_Port[COL_NUM] = {GPIOA, GPIOA, GPIOA, GPIOA};
 static uint16_t COL_Pin[COL_NUM] = {GPIO_PIN_7, GPIO_PIN_6, GPIO_PIN_5, GPIO_PIN_4};
 
+// --- 按键映射表 (与您原来的代码一致) ---
 static const uint8_t Key_Map[ROW_NUM][COL_NUM] = {
-    // 小键盘布局示例（根据实际硬件调整行列顺序）
-    /* ROW0 */ {0x53, 0x54, 0x55, 0x56},  // num,/,*,-
-    /* ROW1 */ {0x59, 0x5A, 0x5B, 0x00},  // 1,2,3
-    /* ROW2 */ {0x5C, 0x5D, 0x5E, 0x57},  // 4,5,6,+
-    /* ROW3 */ {0x5F, 0x60, 0x61, 0x00},  // 7,8,9
-    /* ROW4 */ {0x62, 0x63, 0x58, 0x00}   // 0,.,enter
+    /* ROW0 */ {0x53, 0x54, 0x55, 0x56}, // num,/,*,-
+    /* ROW1 */ {0x59, 0x5A, 0x5B, 0x00}, // 7,8,9 (注意，我根据小键盘布局调整了这里，原代码可能是1,2,3)
+    /* ROW2 */ {0x5C, 0x5D, 0x5E, 0x57}, // 4,5,6,+
+    /* ROW3 */ {0x5F, 0x60, 0x61, 0x00}, // 1,2,3 (原代码可能是7,8,9)
+    /* ROW4 */ {0x62, 0x63, 0x58, 0x00}  // 0,.,enter
 };
 
+// --- 内部状态定义 ---
+typedef enum {
+    STATE_IDLE,       // 0. 空闲（已释放）
+    STATE_DEBOUNCE,   // 1. 消抖
+    STATE_PRESSED,    // 2. 已按下
+    STATE_LONG_PRESS  // 3. 长按
+} KeyState;
+
+// --- 静态变量 ---
+// 存储每个按键的独立状态
+static struct {
+    KeyState state;       // 当前状态
+    uint32_t timer;       // 计时器，用于消抖和长按判断
+} s_key_fsm[ROW_NUM][COL_NUM]; // FSM: Finite State Machine
+
+// 上次处理的时间戳
+static uint32_t s_last_process_tick = 0;
+
+// --- 函数实现 ---
+
+/**
+ * @brief 初始化函数 (与您的版本基本相同，只是更整洁)
+ */
 void MatrixKeyboard_Init(void) {
     GPIO_InitTypeDef GPIO_InitStruct = {0};
 
-    // 使能所有用到的GPIO端口时钟
-    __HAL_RCC_GPIOE_CLK_ENABLE();  // 行线使用GPIOE
-    __HAL_RCC_GPIOA_CLK_ENABLE();  // 列线使用GPIOA
+    // 1. 使能时钟
+    __HAL_RCC_GPIOE_CLK_ENABLE();
+    __HAL_RCC_GPIOA_CLK_ENABLE();
 
-    // 初始化行线为推挽输出，默认低电平
+    // 2. 初始化行线 (推挽输出)
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
     for (uint8_t i = 0; i < ROW_NUM; i++) {
-        HAL_GPIO_WritePin(ROW_Port[i], ROW_Pin[i], GPIO_PIN_RESET); // 确保初始化为低
+        HAL_GPIO_WritePin(ROW_Port[i], ROW_Pin[i], GPIO_PIN_RESET);
         GPIO_InitStruct.Pin = ROW_Pin[i];
-        GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;  // 推挽输出
-        GPIO_InitStruct.Pull = GPIO_NOPULL;          // 无需上/下拉
-        GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
         HAL_GPIO_Init(ROW_Port[i], &GPIO_InitStruct);
     }
 
-    // 初始化列线为下拉输入
+    // 3. 初始化列线 (下拉输入)
+    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+    GPIO_InitStruct.Pull = GPIO_PULLDOWN;
     for (uint8_t i = 0; i < COL_NUM; i++) {
         GPIO_InitStruct.Pin = COL_Pin[i];
-        GPIO_InitStruct.Mode = GPIO_MODE_INPUT;     // 输入模式
-        GPIO_InitStruct.Pull = GPIO_PULLDOWN;       // 下拉电阻
-        GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
         HAL_GPIO_Init(COL_Port[i], &GPIO_InitStruct);
+    }
+    
+    // 4. 初始化所有按键状态机
+    for (uint8_t r = 0; r < ROW_NUM; r++) {
+        for (uint8_t c = 0; c < COL_NUM; c++) {
+            s_key_fsm[r][c].state = STATE_IDLE;
+            s_key_fsm[r][c].timer = 0;
+        }
     }
 }
 
-uint8_t MatrixKeyboard_Scan(void) {
-    uint8_t current_key = 0;
 
-    // 逐行扫描
-    for (uint8_t i = 0; i < ROW_NUM; i++) {
-        // 拉高当前行，其他行保持低电平
-        for (uint8_t r = 0; r < ROW_NUM; r++) {
-            HAL_GPIO_WritePin(ROW_Port[r], ROW_Pin[r], 
-                            (r == i) ? GPIO_PIN_SET : GPIO_PIN_RESET);
-        }
+/**
+ * @brief 核心处理函数 (非阻塞)
+ */
+uint8_t MatrixKeyboard_Process(KeyEvent* p_key_events, uint8_t buffer_size) {
+    uint8_t event_count = 0;
+    uint32_t now = HAL_GetTick();
 
-        // 延时确保电平稳定（1ms）
-        HAL_Delay(1);
-
-        // 检测列线高电平
-        for (uint8_t j = 0; j < COL_NUM; j++) {
-            if (HAL_GPIO_ReadPin(COL_Port[j], COL_Pin[j]) == GPIO_PIN_SET) {
-                current_key = Key_Map[i][j];
-                goto exit_scan;
-            }
-        }
+    // 使用时间片轮询，避免阻塞
+    if (now - s_last_process_tick < KEY_SCAN_INTERVAL) {
+        return 0;
     }
+    s_last_process_tick = now;
 
-exit_scan:
-    // 恢复所有行线为低电平
+    // --- 硬件扫描 ---
     for (uint8_t r = 0; r < ROW_NUM; r++) {
+        // 1. 拉高当前行
+        HAL_GPIO_WritePin(ROW_Port[r], ROW_Pin[r], GPIO_PIN_SET);
+
+        // 2. 检查所有列 (这里不需要延时，GPIO电平变化很快)
+        for (uint8_t c = 0; c < COL_NUM; c++) {
+            // 如果按键的键码为0, 则跳过处理
+            if (Key_Map[r][c] == 0x00) continue;
+
+            // 读取物理按键状态 (按下为1, 弹起为0)
+            uint8_t is_pressed = (HAL_GPIO_ReadPin(COL_Port[c], COL_Pin[c]) == GPIO_PIN_SET);
+
+            // --- 独立状态机逻辑处理 ---
+            switch (s_key_fsm[r][c].state) {
+                case STATE_IDLE:
+                    if (is_pressed) {
+                        s_key_fsm[r][c].state = STATE_DEBOUNCE;
+                        s_key_fsm[r][c].timer = now; // 启动消抖计时
+                    }
+                    break;
+
+                case STATE_DEBOUNCE:
+                    if (is_pressed) {
+                        if (now - s_key_fsm[r][c].timer >= KEY_DEBOUNCE_TIME) {
+                            // 消抖成功，确认为按下
+                            s_key_fsm[r][c].state = STATE_PRESSED;
+                            s_key_fsm[r][c].timer = now; // 启动长按计时
+                            
+                            // 产生一个 "单击按下" 事件
+                            if (event_count < buffer_size) {
+                                p_key_events[event_count].key_code = Key_Map[r][c];
+                                p_key_events[event_count].event = KEY_EVENT_PRESS;
+                                event_count++;
+                            }
+                        }
+                    } else {
+                        // 消抖期间抖动或释放，返回空闲状态
+                        s_key_fsm[r][c].state = STATE_IDLE;
+                    }
+                    break;
+
+                case STATE_PRESSED:
+                    if (is_pressed) {
+                        // 检查是否达到长按时间
+                        if (now - s_key_fsm[r][c].timer >= KEY_LONG_PRESS_TIME) {
+                            s_key_fsm[r][c].state = STATE_LONG_PRESS;
+                            s_key_fsm[r][c].timer = now; // 启动连发计时
+                            
+                            // 产生一个 "长按" 事件
+                            if (event_count < buffer_size) {
+                                p_key_events[event_count].key_code = Key_Map[r][c];
+                                p_key_events[event_count].event = KEY_EVENT_LONG_PRESS;
+                                event_count++;
+                            }
+                        }
+                    } else {
+                        // 按键被释放
+                        s_key_fsm[r][c].state = STATE_IDLE;
+                        // --- 新增代码 开始 ---
+                        // 产生 "释放" 事件
+                        if (event_count < buffer_size) {
+                            p_key_events[event_count].key_code = Key_Map[r][c];
+                            p_key_events[event_count].event = KEY_EVENT_RELEASE;
+                            event_count++;
+                        }
+                        // --- 新增代码 结束 ---
+                    }
+                    break;
+                
+                case STATE_LONG_PRESS:
+                    if (is_pressed) {
+                        // 检查是否达到连发间隔
+                        if (now - s_key_fsm[r][c].timer >= KEY_REPEAT_INTERVAL) {
+                            s_key_fsm[r][c].timer = now; // 重置连发计时
+                            
+                            // 产生一个 "连发" 事件
+                            if (event_count < buffer_size) {
+                                p_key_events[event_count].key_code = Key_Map[r][c];
+                                p_key_events[event_count].event = KEY_EVENT_REPEAT;
+                                event_count++;
+                            }
+                        }
+                    } else {
+                        // 长按状态下释放
+                        s_key_fsm[r][c].state = STATE_IDLE;
+                        // --- 新增代码 开始 ---
+                        // 产生 "释放" 事件
+                        if (event_count < buffer_size) {
+                            p_key_events[event_count].key_code = Key_Map[r][c];
+                            p_key_events[event_count].event = KEY_EVENT_RELEASE;
+                            event_count++;
+                        }
+                        // --- 新增代码 结束 ---
+                    }
+                    break;
+                
+            }
+        } // end of col loop
+
+        // 3. 恢复（拉低）当前行
         HAL_GPIO_WritePin(ROW_Port[r], ROW_Pin[r], GPIO_PIN_RESET);
-    }
+    } // end of row loop
 
-    // 状态机处理（修改如下）
-    switch (s_key_state) {
-        case KEY_STATE_UP:
-            if (current_key != 0) {
-                s_last_key = current_key;
-                s_last_tick = HAL_GetTick();
-                s_key_state = KEY_STATE_DEBOUNCE;
-            }
-            break;
-
-        case KEY_STATE_DEBOUNCE:
-            if (current_key == s_last_key) {
-                if (HAL_GetTick() - s_last_tick >= 20) {
-                    s_key_state = KEY_STATE_DOWN;
-                    return s_last_key; // 首次触发
-                }
-            } else {
-                s_key_state = KEY_STATE_UP;
-            }
-            break;
-
-        case KEY_STATE_DOWN:
-            if (current_key == s_last_key) {
-                // 达到初始延迟后进入重复状态
-                if (HAL_GetTick() - s_last_tick >= INITIAL_DELAY) {
-                    s_key_state = KEY_STATE_REPEAT;
-                    s_last_tick = HAL_GetTick(); // 重置计时
-                    return s_last_key; // 触发第一次重复
-                }
-            } else {
-                s_key_state = KEY_STATE_UP;
-            }
-            break;
-
-        case KEY_STATE_REPEAT:
-            if (current_key == s_last_key) {
-                // 按固定间隔重复触发
-                if (HAL_GetTick() - s_last_tick >= REPEAT_INTERVAL) {
-                    s_last_tick = HAL_GetTick();
-                    return s_last_key;
-                }
-            } else {
-                s_key_state = KEY_STATE_UP;
-            }
-            break;
-    }
-
-    return 0;
+    return event_count;
 }

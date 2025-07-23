@@ -25,6 +25,8 @@
 /* USER CODE BEGIN Includes */
 #include "usbd_hid.h"
 #include "matrix_keyboard.h"  // 包含矩阵键盘头文件
+#include <stdbool.h>
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -54,6 +56,9 @@ typedef struct {
     uint8_t keycode[6]; // 最多6键
 } HID_KeyboardReport;
 #pragma pack(pop)
+
+// 添加键盘报告变量
+static HID_KeyboardReport keyboard_report;
 
 // 发送HID报告
 void Send_HID_Report(uint8_t keycode) {
@@ -112,28 +117,93 @@ int main(void)
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
   MatrixKeyboard_Init();
-  uint8_t last_key = 0;
-  /* USER CODE END 2 */
+  /* 定义一个缓冲区来接收按键事件 */
+   KeyEvent key_events_buffer[MAX_PRESSED_KEYS];
+   
+  // 用于标记HID报告是否需要更新并发送
+  bool report_needs_update = false;
 
+  // 清空初始的键盘报告
+  memset(&keyboard_report, 0, sizeof(keyboard_report));  
+  
+  /* USER CODE END 2 */
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    uint8_t key = MatrixKeyboard_Scan();
-        
-        if (key != 0) {
-            Send_HID_Report(key);  // 按下或重复时发送
-            last_key = key;
-        } else if (last_key != 0) {
-            Send_HID_Report(0);    // 释放时发送空报告
-            last_key = 0;
+    // 1. 非阻塞地调用键盘处理函数，获取事件列表
+        uint8_t event_count = MatrixKeyboard_Process(key_events_buffer, MAX_PRESSED_KEYS);
+
+        // 2. 如果有任何事件发生，则处理它们
+        if (event_count > 0) {
+            // 标记报告需要更新
+            report_needs_update = true;
+
+            for (uint8_t i = 0; i < event_count; i++) {
+                KeyEvent event = key_events_buffer[i];
+
+                if (event.event == KEY_EVENT_PRESS || 
+                    event.event == KEY_EVENT_LONG_PRESS || 
+                    event.event == KEY_EVENT_REPEAT) 
+                {
+                    // 按下事件: 将键码添加到HID报告中
+                    // 查找一个空位来存放新的键码
+                    for (int j = 0; j < 6; j++) {
+                        if (keyboard_report.keycode[j] == 0x00) {
+                            keyboard_report.keycode[j] = event.key_code;
+                            break;
+                        }
+                    }
+                } 
+                else if (event.event == KEY_EVENT_RELEASE) 
+                {
+                    // 释放事件: 从HID报告中移除该键码
+                    for (int j = 0; j < 6; j++) {
+                        if (keyboard_report.keycode[j] == event.key_code) {
+                            keyboard_report.keycode[j] = 0x00; // 清除
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. 检查是否需要发送HID报告
+        // 只有在按键状态变化时才发送，这比每次循环都发送更高效
+        if (report_needs_update) {
+            // 清除更新标记
+            report_needs_update = false;
+
+            // 发送HID报告 (这里的 hUsbDeviceFS 是STM32CubeMX生成的标准句柄)
+            USBD_HID_SendReport(&hUsbDeviceFS, (uint8_t*)&keyboard_report, sizeof(keyboard_report));
+            
+            // 为了处理按键释放，我们需要在发送完有效报告后，
+            // 立即发送一个全零的 "释放" 报告。
+            // 但更好的做法是让PC自己处理按键释放。
+            // 只有当所有按键都释放时，我们才需要发送一个全零报告。
+            // 我们可以通过检查 keyboard_report 是否全为0来判断。
+            bool all_keys_released = true;
+            for(int j=0; j<6; j++) {
+                if (keyboard_report.keycode[j] != 0) {
+                    all_keys_released = false;
+                    break;
+                }
+            }
+
+            // 如果所有按键都释放了，并且上一次不是全零报告，则发送一次全零报告
+            if(all_keys_released){
+                 // 稍作延时，确保上一个报告被PC接收
+                 HAL_Delay(10); 
+                 // 发送全零报告
+                 memset(&keyboard_report, 0, sizeof(keyboard_report));
+                 USBD_HID_SendReport(&hUsbDeviceFS, (uint8_t*)&keyboard_report, sizeof(keyboard_report));
+            }
         }
         
-        HAL_Delay(10);
+        // 可以在这里加一个非常短的延时，以降低CPU使用率，但不是必须的
+        // HAL_Delay(1); 
+    }
     /* USER CODE END WHILE */
-
     /* USER CODE BEGIN 3 */
-  }
   /* USER CODE END 3 */
 }
 
