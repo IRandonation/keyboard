@@ -248,8 +248,8 @@
           "bin": "",
           "baseAddr": "",
           "cpuInfo": {
-            "vendor": "null",
-            "cpuName": "null"
+            "vendor": "ST",
+            "cpuName": "STM32F407VE"
           },
           "proType": 1,
           "speed": 8000,
