@@ -1,4 +1,6 @@
 #include "matrix_keyboard.h"
+#include <string.h>
+#include <stdbool.h>
 
 // --- GPIO 配置 (与您原来的代码一致) ---
 static GPIO_TypeDef* ROW_Port[ROW_NUM] = {GPIOE, GPIOE, GPIOE, GPIOE, GPIOE};
@@ -31,8 +33,44 @@ static struct {
     uint32_t timer;       // 计时器，用于消抖和长按判断
 } s_key_fsm[ROW_NUM][COL_NUM]; // FSM: Finite State Machine
 
+// 积分消抖计数器
+static uint8_t s_int_cnt[ROW_NUM][COL_NUM];
+#define INT_PRESS_THRESH    5   // 达到该积分认定为按下
+#define INT_RELEASE_THRESH  2   // 下降到该积分认定为释放
+
 // 上次处理的时间戳
 static uint32_t s_last_process_tick = 0;
+
+// ---- 事件队列（ISR生产，主循环消费） ----
+#define EVENT_QUEUE_SIZE 32
+static volatile uint8_t s_evt_head = 0;
+static volatile uint8_t s_evt_tail = 0;
+static KeyEvent s_evt_queue[EVENT_QUEUE_SIZE];
+
+static inline void push_event_isr(uint8_t r, uint8_t c, KeyEventType type)
+{
+    uint8_t next_head = (uint8_t)((s_evt_head + 1) % EVENT_QUEUE_SIZE);
+    if (next_head == s_evt_tail) {
+        // 队列满，丢弃最旧一个，释放一格
+        s_evt_tail = (uint8_t)((s_evt_tail + 1) % EVENT_QUEUE_SIZE);
+    }
+    s_evt_queue[s_evt_head].key_code = Key_Map[r][c];
+    s_evt_queue[s_evt_head].row = r;
+    s_evt_queue[s_evt_head].col = c;
+    s_evt_queue[s_evt_head].event = type;
+    s_evt_head = next_head;
+}
+
+bool MatrixKeyboard_PopEvent(KeyEvent* out_event)
+{
+    if (s_evt_tail == s_evt_head) return false; // 空
+    *out_event = s_evt_queue[s_evt_tail];
+    s_evt_tail = (uint8_t)((s_evt_tail + 1) % EVENT_QUEUE_SIZE);
+    return true;
+}
+
+// 定时器ISR时间基准（ms）
+static volatile uint32_t s_isr_tick_ms = 0;
 
 // --- 函数实现 ---
 
@@ -69,6 +107,7 @@ void MatrixKeyboard_Init(void) {
         for (uint8_t c = 0; c < COL_NUM; c++) {
             s_key_fsm[r][c].state = STATE_IDLE;
             s_key_fsm[r][c].timer = 0;
+            s_int_cnt[r][c] = 0;
         }
     }
 }
@@ -105,27 +144,30 @@ uint8_t MatrixKeyboard_Process(KeyEvent* p_key_events, uint8_t buffer_size) {
                 case STATE_IDLE:
                     if (is_pressed) {
                         s_key_fsm[r][c].state = STATE_DEBOUNCE;
-                        s_key_fsm[r][c].timer = now; // 启动消抖计时
+                        s_int_cnt[r][c] = 0; // 积分从0开始
+                        s_key_fsm[r][c].timer = now; // 记录时间用于后续长按
                     }
                     break;
 
                 case STATE_DEBOUNCE:
                     if (is_pressed) {
-                        if (now - s_key_fsm[r][c].timer >= KEY_DEBOUNCE_TIME) {
-                            // 消抖成功，确认为按下
+                        if (s_int_cnt[r][c] < 255) s_int_cnt[r][c]++;
+                        if (s_int_cnt[r][c] >= INT_PRESS_THRESH) {
                             s_key_fsm[r][c].state = STATE_PRESSED;
                             s_key_fsm[r][c].timer = now; // 启动长按计时
-                            
-                            // 产生一个 "单击按下" 事件
                             if (event_count < buffer_size) {
                                 p_key_events[event_count].key_code = Key_Map[r][c];
+                                p_key_events[event_count].row = r;
+                                p_key_events[event_count].col = c;
                                 p_key_events[event_count].event = KEY_EVENT_PRESS;
                                 event_count++;
                             }
                         }
                     } else {
-                        // 消抖期间抖动或释放，返回空闲状态
-                        s_key_fsm[r][c].state = STATE_IDLE;
+                        if (s_int_cnt[r][c] > 0) s_int_cnt[r][c]--;
+                        if (s_int_cnt[r][c] == 0) {
+                            s_key_fsm[r][c].state = STATE_IDLE;
+                        }
                     }
                     break;
 
@@ -139,21 +181,25 @@ uint8_t MatrixKeyboard_Process(KeyEvent* p_key_events, uint8_t buffer_size) {
                             // 产生一个 "长按" 事件
                             if (event_count < buffer_size) {
                                 p_key_events[event_count].key_code = Key_Map[r][c];
+                                p_key_events[event_count].row = r;
+                                p_key_events[event_count].col = c;
                                 p_key_events[event_count].event = KEY_EVENT_LONG_PRESS;
                                 event_count++;
                             }
                         }
                     } else {
-                        // 按键被释放
-                        s_key_fsm[r][c].state = STATE_IDLE;
-                        // --- 新增代码 开始 ---
-                        // 产生 "释放" 事件
-                        if (event_count < buffer_size) {
-                            p_key_events[event_count].key_code = Key_Map[r][c];
-                            p_key_events[event_count].event = KEY_EVENT_RELEASE;
-                            event_count++;
+                        // 积分下降判定释放
+                        if (s_int_cnt[r][c] > 0) s_int_cnt[r][c]--;
+                        if (s_int_cnt[r][c] <= INT_RELEASE_THRESH) {
+                            s_key_fsm[r][c].state = STATE_IDLE;
+                            if (event_count < buffer_size) {
+                                p_key_events[event_count].key_code = Key_Map[r][c];
+                                p_key_events[event_count].row = r;
+                                p_key_events[event_count].col = c;
+                                p_key_events[event_count].event = KEY_EVENT_RELEASE;
+                                event_count++;
+                            }
                         }
-                        // --- 新增代码 结束 ---
                     }
                     break;
                 
@@ -166,21 +212,24 @@ uint8_t MatrixKeyboard_Process(KeyEvent* p_key_events, uint8_t buffer_size) {
                             // 产生一个 "连发" 事件
                             if (event_count < buffer_size) {
                                 p_key_events[event_count].key_code = Key_Map[r][c];
+                                p_key_events[event_count].row = r;
+                                p_key_events[event_count].col = c;
                                 p_key_events[event_count].event = KEY_EVENT_REPEAT;
                                 event_count++;
                             }
                         }
                     } else {
-                        // 长按状态下释放
-                        s_key_fsm[r][c].state = STATE_IDLE;
-                        // --- 新增代码 开始 ---
-                        // 产生 "释放" 事件
-                        if (event_count < buffer_size) {
-                            p_key_events[event_count].key_code = Key_Map[r][c];
-                            p_key_events[event_count].event = KEY_EVENT_RELEASE;
-                            event_count++;
+                        if (s_int_cnt[r][c] > 0) s_int_cnt[r][c]--;
+                        if (s_int_cnt[r][c] <= INT_RELEASE_THRESH) {
+                            s_key_fsm[r][c].state = STATE_IDLE;
+                            if (event_count < buffer_size) {
+                                p_key_events[event_count].key_code = Key_Map[r][c];
+                                p_key_events[event_count].row = r;
+                                p_key_events[event_count].col = c;
+                                p_key_events[event_count].event = KEY_EVENT_RELEASE;
+                                event_count++;
+                            }
                         }
-                        // --- 新增代码 结束 ---
                     }
                     break;
                 
@@ -192,4 +241,80 @@ uint8_t MatrixKeyboard_Process(KeyEvent* p_key_events, uint8_t buffer_size) {
     } // end of row loop
 
     return event_count;
+}
+
+// 在1kHz中断里运行的扫描例程：生成事件，推入队列
+void MatrixKeyboard_ScanStep_ISR(void)
+{
+    s_isr_tick_ms++; // 每次周期+1ms
+
+    uint32_t now = s_isr_tick_ms;
+
+    for (uint8_t r = 0; r < ROW_NUM; r++) {
+        // 直接寄存器：拉高当前行
+        ROW_Port[r]->BSRR = ROW_Pin[r];
+
+        for (uint8_t c = 0; c < COL_NUM; c++) {
+            if (Key_Map[r][c] == 0x00) continue;
+            // 直接寄存器：读取列状态
+            uint8_t is_pressed = ((COL_Port[c]->IDR & COL_Pin[c]) != 0U);
+
+            switch (s_key_fsm[r][c].state) {
+                case STATE_IDLE:
+                    if (is_pressed) {
+                        s_key_fsm[r][c].state = STATE_DEBOUNCE;
+                        s_int_cnt[r][c] = 0;
+                        s_key_fsm[r][c].timer = now;
+                    }
+                    break;
+                case STATE_DEBOUNCE:
+                    if (is_pressed) {
+                        if (s_int_cnt[r][c] < 255) s_int_cnt[r][c]++;
+                        if (s_int_cnt[r][c] >= INT_PRESS_THRESH) {
+                            s_key_fsm[r][c].state = STATE_PRESSED;
+                            s_key_fsm[r][c].timer = now;
+                            push_event_isr(r, c, KEY_EVENT_PRESS);
+                        }
+                    } else {
+                        if (s_int_cnt[r][c] > 0) s_int_cnt[r][c]--;
+                        if (s_int_cnt[r][c] == 0) {
+                            s_key_fsm[r][c].state = STATE_IDLE;
+                        }
+                    }
+                    break;
+                case STATE_PRESSED:
+                    if (is_pressed) {
+                        if (now - s_key_fsm[r][c].timer >= KEY_LONG_PRESS_TIME) {
+                            s_key_fsm[r][c].state = STATE_LONG_PRESS;
+                            s_key_fsm[r][c].timer = now;
+                            push_event_isr(r, c, KEY_EVENT_LONG_PRESS);
+                        }
+                    } else {
+                        if (s_int_cnt[r][c] > 0) s_int_cnt[r][c]--;
+                        if (s_int_cnt[r][c] <= INT_RELEASE_THRESH) {
+                            s_key_fsm[r][c].state = STATE_IDLE;
+                            push_event_isr(r, c, KEY_EVENT_RELEASE);
+                        }
+                    }
+                    break;
+                case STATE_LONG_PRESS:
+                    if (is_pressed) {
+                        if (now - s_key_fsm[r][c].timer >= KEY_REPEAT_INTERVAL) {
+                            s_key_fsm[r][c].timer = now;
+                            push_event_isr(r, c, KEY_EVENT_REPEAT);
+                        }
+                    } else {
+                        if (s_int_cnt[r][c] > 0) s_int_cnt[r][c]--;
+                        if (s_int_cnt[r][c] <= INT_RELEASE_THRESH) {
+                            s_key_fsm[r][c].state = STATE_IDLE;
+                            push_event_isr(r, c, KEY_EVENT_RELEASE);
+                        }
+                    }
+                    break;
+            }
+        }
+
+        // 直接寄存器：拉低当前行
+        ROW_Port[r]->BSRR = ((uint32_t)ROW_Pin[r] << 16);
+    }
 }

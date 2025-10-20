@@ -2,6 +2,7 @@
 #define __MATRIX_KEYBOARD_H
 
 #include "stm32f4xx_hal.h"
+#include <stdbool.h>
 // --- 可配置参数 ---
 
 // 1. 定义行列数量
@@ -34,6 +35,8 @@ typedef enum {
  */
 typedef struct {
     uint8_t      key_code; // 按键的键码 (来自Key_Map)
+    uint8_t      row;      // 行索引
+    uint8_t      col;      // 列索引
     KeyEventType event;    // 按键的事件类型
 } KeyEvent;
 
@@ -49,5 +52,16 @@ void MatrixKeyboard_Init(void);
  * @return uint8_t     - 本次调用检测到的有效按键事件数量
  */
 uint8_t MatrixKeyboard_Process(KeyEvent* p_key_events, uint8_t buffer_size);
+
+/**
+ * @brief 在TIM中断里调用的扫描步进函数（1kHz）。
+ */
+void MatrixKeyboard_ScanStep_ISR(void);
+
+/**
+ * @brief 从事件队列取出一个事件，主循环调用。
+ * @return true 表示取到事件；false 表示队列为空。
+ */
+bool MatrixKeyboard_PopEvent(KeyEvent* out_event);
 
 #endif // __MATRIX_KEYBOARD_H

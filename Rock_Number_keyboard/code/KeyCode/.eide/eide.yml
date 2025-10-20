@@ -1,0 +1,179 @@
+version: "4.1"
+name: KeyCode
+type: ARM
+deviceName: STM32F407VETx
+packDir: .pack/Keil/STM32F4xx_DFP.2.14.0
+srcDirs: []
+virtualFolder:
+  name: <virtual_root>
+  files: []
+  folders:
+    - name: Application
+      files: []
+      folders:
+        - name: MDK-ARM
+          files:
+            - path: MDK-ARM/startup_stm32f407xx.s
+          folders: []
+        - name: User
+          files: []
+          folders:
+            - name: Core
+              files:
+                - path: Core/Src/main.c
+                - path: Core/Src/gpio.c
+                - path: Core/Src/stm32f4xx_it.c
+                - path: Core/Src/stm32f4xx_hal_msp.c
+                - path: Core/Src/matrix_keyboard.c
+                - path: Core/Src/system_stm32f4xx.c
+                - path: Core/Src/tim.c
+                - path: Core/Src/ws2812.c
+              folders: []
+            - name: USB_DEVICE
+              files: []
+              folders:
+                - name: App
+                  files:
+                    - path: USB_DEVICE/App/usb_device.c
+                    - path: USB_DEVICE/App/usbd_desc.c
+                  folders: []
+                - name: Target
+                  files:
+                    - path: USB_DEVICE/Target/usbd_conf.c
+                  folders: []
+    - name: Drivers
+      files: []
+      folders:
+        - name: STM32F4xx_HAL_Driver
+          files:
+            - path: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_pcd.c
+            - path: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_pcd_ex.c
+            - path: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_ll_usb.c
+            - path: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_rcc.c
+            - path: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_rcc_ex.c
+            - path: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_flash.c
+            - path: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_flash_ex.c
+            - path: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_flash_ramfunc.c
+            - path: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_gpio.c
+            - path: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_dma_ex.c
+            - path: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_dma.c
+            - path: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_pwr.c
+            - path: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_pwr_ex.c
+            - path: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_cortex.c
+            - path: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal.c
+            - path: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_exti.c
+            - path: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_tim.c
+            - path: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_tim_ex.c
+          folders: []
+        - name: CMSIS
+          files:
+            - path: Core/Src/system_stm32f4xx.c
+          folders: []
+    - name: Middlewares
+      files: []
+      folders:
+        - name: USB_Device_Library
+          files:
+            - path: Middlewares/ST/STM32_USB_Device_Library/Core/Src/usbd_core.c
+            - path: Middlewares/ST/STM32_USB_Device_Library/Core/Src/usbd_ctlreq.c
+            - path: Middlewares/ST/STM32_USB_Device_Library/Core/Src/usbd_ioreq.c
+            - path: Middlewares/ST/STM32_USB_Device_Library/Class/HID/Src/usbd_hid.c
+          folders: []
+dependenceList: []
+outDir: build
+miscInfo:
+  uid: 93c739c956ab0b2426a27561f990bab1
+targets:
+  KeyCode:
+    cppPreprocessAttrs:
+      defineList:
+        - USE_HAL_DRIVER
+        - STM32F407xx
+      incList:
+        - .
+        - USB_DEVICE/App
+        - USB_DEVICE/Target
+        - Drivers/STM32F4xx_HAL_Driver/Inc
+        - Drivers/STM32F4xx_HAL_Driver/Inc/Legacy
+        - Middlewares/ST/STM32_USB_Device_Library/Core/Inc
+        - Middlewares/ST/STM32_USB_Device_Library/Class/HID/Inc
+        - Drivers/CMSIS/Device/ST/STM32F4xx/Include
+        - Drivers/CMSIS/Include
+        - .cmsis/include
+        - MDK-ARM/RTE/_KeyCode
+        - Core/Inc
+      libList: []
+    excludeList: []
+    toolchain: AC5
+    toolchainConfigMap:
+      AC5:
+        archExtensions: ""
+        cpuType: Cortex-M4
+        floatingPointHardware: single
+        options:
+          version: 4
+          afterBuildTasks: []
+          asm-compiler: {}
+          beforeBuildTasks: []
+          c/cpp-compiler:
+            CXX_FLAGS: --diag_suppress=1 --diag_suppress=1295
+            C_FLAGS: --diag_suppress=1 --diag_suppress=1295
+            c99-mode: true
+            one-elf-section-per-function: true
+            optimization: level-3
+            warnings: all-warnings
+          global:
+            output-debug-info: enable
+            use-microLIB: false
+          linker:
+            output-format: elf
+            ro-base: ""
+            rw-base: ""
+            xo-base: ""
+        scatterFilePath: ""
+        storageLayout:
+          RAM:
+            - id: 1
+              isChecked: true
+              mem:
+                size: "0x00020000"
+                startAddr: "0x20000000"
+              noInit: false
+              tag: IRAM
+            - id: 2
+              isChecked: true
+              mem:
+                size: "0x00010000"
+                startAddr: "0x10000000"
+              noInit: false
+              tag: IRAM
+          ROM:
+            - id: 1
+              isChecked: true
+              isStartup: true
+              mem:
+                size: "0x00080000"
+                startAddr: "0x08000000"
+              tag: IROM
+        useCustomScatterFile: false
+    uploadConfigMap:
+      JLink:
+        baseAddr: ""
+        bin: ""
+        cpuInfo:
+          cpuName: STM32F407VE
+          vendor: ST
+        otherCmds: ""
+        proType: 1
+        speed: 8000
+      STLink:
+        address: "0x08000000"
+        bin: ""
+        elFile: None
+        optionBytes: .eide/keycode.st.option.bytes.ini
+        otherCmds: ""
+        proType: SWD
+        resetMode: default
+        runAfterProgram: true
+        speed: 4000
+    uploader: JLink
